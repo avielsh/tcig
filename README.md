@@ -14,3 +14,7 @@ Track cigarette smoking during the day
 ```tcig rmlast``` - Remove latest entry
 
 ```tcig replast``` - Replace latest entry from full to partial cigarette
+
+```tcig comp``` - Compare smoking time to previous days
+
+```tcig c``` - Check when last smoked
