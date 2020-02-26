@@ -52,9 +52,15 @@ getstats() {
   echo "$one"
 }
 
+get_hours() {
+  minutes=$1
+  (( $minutes > 60 )) && echo "$(( $minutes /60 )) hours, $(( $minutes % 60 )) minutes" && return
+  echo "$minutes minutes"
+}
+
 gettodaystats() {
-  local alldiffs=()
   local partial one alltimes diff alldiffs prevtime maxdiff mindiff
+  declare -a alldiffs
   partial=$(grep $msg_partial $cigfile | grep $today | awk '{print $1}' | uniq -c | awk '{print $1}')
   one=$(grep $msg_one $cigfile | grep $today | awk '{print $1}' | uniq -c | awk '{print $1}')
   alltimes=$(cat $cigfile | grep $today | awk '{print $2}')
@@ -67,8 +73,8 @@ gettodaystats() {
     prevtime=$time
   done
   IFS=$'\n'
-  maxdiff=$(echo "$alldiffs[*]" | sort -nr | head -n1)
-  mindiff=$(echo "$alldiffs[*]" | sort -nr | tail -1)
+  maxdiff=$(get_hours $(echo "$alldiffs[*]" | sort -nr | head -n1))
+  mindiff=$(get_hours $(echo "$alldiffs[*]" | sort -nr | tail -1) )
   IFS="$OLDIFS"
   echo "One: $one"
   echo "Partial: $partial"
@@ -82,4 +88,6 @@ gettodaystats() {
 [[ $1 == "tstats" ]] && gettodaystats
 [[ $1 == "stats" ]] && getstats
 [[ $1 == "rmlast" ]] && gsed -i '$d' $cigfile
+[[ $1 == "replast" ]] && gsed -i '$'"s/$msg_one/$msg_partial/" $cigfile
 [[ $1 == "ls" ]] && grep $today $cigfile
+

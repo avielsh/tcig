@@ -13,3 +13,4 @@ Track cigarette smoking during the day
 
 ```tcig rmlast``` - Remove latest entry
 
+```tcig replast``` - Replace latest entry from full to partial cigarette
