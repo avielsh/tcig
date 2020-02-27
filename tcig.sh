@@ -1,11 +1,21 @@
 #!/bin/zsh
-cigfile="$HOME/cigs"
+cigfile="$HOME/cigs" #Change this path to your prefered cigfile
+target=60 #target in minutes for next smoke
+targetpartial=20 #target in minutes for next partial
 now=$(gdate +'%m-%d %H:%M')
-yesterday=$(gdate -d "-1days" +'%m-%d %H:%M')
 today=$(echo $now | awk '{print $1}')
+
 msg_partial="Smoked partial"
 msg_one="Smoked one"
+
 OLDIFS="$IFS"
+
+red=$(tput setaf 1)
+blue=$(tput setaf 4)
+white=$(tput setaf 7)
+green=$(tput setaf 10)
+yellow=$(tput setaf 3)
+purple=$(tput setaf 13)
 
 date_diff() {
   local old new sec_old sec_new
@@ -19,28 +29,42 @@ date_diff() {
   echo "$(( (sec_new - sec_old) / 60))"
 }
 
-last_cig_difference() {
-  local last thiscig diff
+get_cig_diff() {
+  local last thiscig diff 
   tail -1 $cigfile | grep -q $today || { echo "No cigarettes smoked today (yet)" ; return ; }
   last=$(tail -1 $cigfile | helper_get_time)
   thiscig=$(echo $now | helper_get_time)
   diff=$(date_diff $last $thiscig)
-  echo Last cigarette was $diff minutes ago
+  echo $diff
+}
+
+last_cig_difference() {
+  local diff
+  diff=$(get_cig_diff)
+  echo Last cigarette was $(get_hours $diff) ago
 }
 
 addcig() {
-  last_cig_difference
-  echo $now $msg_one >> $cigfile
+  local diff
+  last_cig_difference 
+  diff=$(get_cig_diff)
+  (( $diff < $target )) && echo "${red}Error${white} - Will not add entry since you have not reached your target pause time between cigarettes! ($(get_hours $target))" ||
+    echo $now $msg_one >> $cigfile
 }
 
 addpartialcig() {
-  last_cig_difference
-  echo $now $msg_partial >> $cigfile
+  local diff
+  last_cig_difference 
+  diff=$(get_cig_diff)
+  (( $diff < $targetpartial )) && echo "${red}Error${white} - Will not add entry since you have not reached your target pause time between partial cigarettes! ($(get_hours $targetpartial))" ||
+    echo $now $msg_partial >> $cigfile
 }
 
 helper_get_date() {
-  read -r line
-  echo $line | awk '{print $1}'
+  while read -r line
+  do
+    echo $line | awk '{print $1}'
+  done
 }
 
 
@@ -75,6 +99,10 @@ compare_with_day() {
       ;;
     *)
       timeago=$1
+      [[ $timeago =~ ^[0-9]{2}-[0-9]{2}$ ]] && timeago="$(gdate +'%Y')-${timeago}"
+      #handle reversed day-month
+      gdate -d $timeago 2>/dev/null || { IFS=- read year month day <<<"$timeago"
+        timeago=$year-$day-$month ; }
       ;;
   esac
   [[ -z $1 ]] && timeago="-1days"
@@ -125,13 +153,30 @@ gettodaystats() {
   printf '%-35s %s\n' "Average duration between smokes:" "$average"
 }
 
+case $1 in
+  c)
+    last_cig_difference
+    ;;
+  p)
+    addpartialcig
+    ;;
+  tstats)
+    gettodaystats
+    ;;
+  stats)
+    getstats
+    ;;
+  rmlast)
+    gsed -i '$d' $cigfile
+    ;;
+  replast)
+    gsed -i '$'"s/$msg_one/$msg_partial/" $cigfile
+    ;;
+  comp)
+    compare_days $2
+    ;;
+  ls)
+    grep $today $cigfile
+    ;;
+esac
 [[ -z $1 ]] && addcig
-[[ $1 == "c" ]] && last_cig_difference
-[[ $1 == "p" ]] && addpartialcig
-[[ $1 == "tstats" ]] && gettodaystats
-[[ $1 == "stats" ]] && getstats
-[[ $1 == "rmlast" ]] && gsed -i '$d' $cigfile
-[[ $1 == "replast" ]] && gsed -i '$'"s/$msg_one/$msg_partial/" $cigfile
-[[ $1 == "comp" ]] && compare_days $2
-[[ $1 == "ls" ]] && grep $today $cigfile
-
