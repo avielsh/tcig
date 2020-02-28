@@ -1,7 +1,10 @@
 #!/bin/zsh
+#config
 cigfile="$HOME/cigs" #Change this path to your prefered cigfile
 target=60 #target in minutes for next smoke
 targetpartial=20 #target in minutes for next partial
+
+#main
 now=$(gdate +'%m-%d %H:%M')
 today=$(echo $now | awk '{print $1}')
 
@@ -30,8 +33,11 @@ date_diff() {
 }
 
 get_cig_diff() {
-  local last thiscig diff 
-  tail -1 $cigfile | grep -q $today || { echo "No cigarettes smoked today (yet)" ; return ; }
+  local last thiscig diff
+  tail -1 $cigfile | grep -q $today || {
+    [[ -z $1 ]] && echo "No cigarettes smoked today (yet)" >/dev/stderr
+      echo -1
+      return ; }
   last=$(tail -1 $cigfile | helper_get_time)
   thiscig=$(echo $now | helper_get_time)
   diff=$(date_diff $last $thiscig)
@@ -41,23 +47,33 @@ get_cig_diff() {
 last_cig_difference() {
   local diff
   diff=$(get_cig_diff)
-  echo Last cigarette was $(get_hours $diff) ago
+  [[ $diff -ne -1 ]] &&
+    echo Last cigarette was $(get_hours $diff) ago
+}
+
+check_passed_target() {
+  target=$1
+
+  diff=$(get_cig_diff silent)
+  if [[ $diff -ne -1 &&  $diff -lt $target ]]
+  then
+    echo "${red}Error${white} - Will not add entry since you have not reached your target pause time between cigarettes! ($(get_hours $target))\nYou have $(($target - $diff)) minutes to go"
+    return 1
+  else
+    return 0
+  fi
 }
 
 addcig() {
-  local diff
-  last_cig_difference 
-  diff=$(get_cig_diff)
-  (( $diff < $target )) && echo "${red}Error${white} - Will not add entry since you have not reached your target pause time between cigarettes! ($(get_hours $target))" ||
-    echo $now $msg_one >> $cigfile
+  last_cig_difference
+  check_passed_target $target &&  echo $now $msg_one >> $cigfile
+  [[ $1 == "-f" ]] && echo "${blue}Warning${white} Forced entry" && echo "$now [forced] $msg_one" >> $cigfile
 }
 
 addpartialcig() {
-  local diff
-  last_cig_difference 
-  diff=$(get_cig_diff)
-  (( $diff < $targetpartial )) && echo "${red}Error${white} - Will not add entry since you have not reached your target pause time between partial cigarettes! ($(get_hours $targetpartial))" ||
-    echo $now $msg_partial >> $cigfile
+  last_cig_difference
+  check_passed_target $targetpartial && echo $now $msg_partial >> $cigfile
+  [[ $1 == "-f" ]] && echo "${blue}Warning${white} Forced entry" && echo "$now [forced] $msg_partial" >> $cigfile
 }
 
 helper_get_date() {
@@ -81,8 +97,8 @@ getstats() {
   total=$(awk '{print $1}' $cigfile | uniq -c)
   partial=$(grep $msg_partial $cigfile | helper_get_date | uniq -c)
   one=$(grep $msg_one $cigfile | helper_get_date | uniq -c)
-  echo Total 
-  echo "$total"  
+  echo Total
+  echo "$total"
   echo Partial
   echo "$partial"
   echo One
@@ -90,7 +106,7 @@ getstats() {
 }
 
 compare_with_day() {
-  case $1 in 
+  case $1 in
     *d)
       timeago="-${1}ays"
       ;;
@@ -126,12 +142,34 @@ get_hours() {
   echo "$minutes minutes"
 }
 
-gettodaystats() {
-  local partial one alltimes diff alldiffs prevtime maxdiff mindiff
+getdaystats() {
+  local partial one alltimes diff alldiffs prevtime maxdiff mindiff forced day timeago
   declare -a alldiffs
-  partial=$(grep $msg_partial $cigfile | grep $today | helper_get_date | uniq -c | awk '{print $1}')
-  one=$(grep $msg_one $cigfile | grep $today | helper_get_date | uniq -c | awk '{print $1}')
-  alltimes=$(cat $cigfile | grep $today | helper_get_time)
+  [[ -z $1 ]] && day=$today ||
+  case $1 in
+    *d)
+      timeago="-${1}ays"
+      ;;
+    w)
+      timeago="-7days"
+      ;;
+    *)
+      timeago=$1
+      [[ $timeago =~ ^[0-9]{2}-[0-9]{2}$ ]] && timeago="$(gdate +'%Y')-${timeago}"
+      #handle reversed day-month
+      gdate -d $timeago >/dev/null 2>&1 || { IFS=- read year month day <<<"$timeago"
+      timeago=$year-$day-$month ; }
+      ;;
+  esac
+
+  [[ -n "$timeago" ]] && day=$(gdate -d "$timeago" +'%m-%d %H:%M')
+  day=$(echo $day | helper_get_date)
+
+  alltimes=$(cat $cigfile | grep $day | helper_get_time)
+  [[ -z $alltimes ]] && echo "No data for $day" && return
+  partial=$(grep $msg_partial $cigfile | grep $day | helper_get_date | uniq -c | awk '{print $1}')
+  forced=$(grep "\[forced\]" $cigfile | grep $day | helper_get_date | uniq -c | awk '{print $1}')
+  one=$(grep $msg_one $cigfile | grep $day | helper_get_date | uniq -c | awk '{print $1}')
 
   echo "$alltimes" | while read time
   do
@@ -140,13 +178,21 @@ gettodaystats() {
     alldiffs+=$diff
     prevtime=$time
   done
+
   IFS=$'\n'
   maxdiff=$(get_hours $(echo "$alldiffs[*]" | sort -nr | head -n1))
   mindiff=$(get_hours $(echo "$alldiffs[*]" | sort -nr | tail -1) )
-  average=$(get_hours $(( $( echo "$alldiffs[*]"| paste -sd+ - | bc ) / ${#alldiffs[@]} )) )
+  average=$(get_hours $(( $( echo "$alldiffs[*]"| paste -sd+ - | bc ) / $#alldiffs[@] )) )
   IFS="$OLDIFS"
+
+  [[ -z $forced ]] && forced=0
+  [[ -z $partial ]] && partial=0
+  [[ -z $one ]] && one=0
+
+  echo "Stats for $day"
   printf '%-35s %s\n'  "One:" "$one cigarettes"
   printf '%-35s %s\n'  "Partial:" "$partial cigarettes"
+  printf '%-35s %s\n'  "Forced:" "$forced cigarettes"
   printf '%-35s %s\n' "Time differences between smokes:" "$alldiffs"
   printf '%-35s %s\n' "Longest duration between smokes:" "$maxdiff"
   printf '%-35s %s\n' "Shortest duration between smokes:" "$mindiff"
@@ -158,10 +204,10 @@ case $1 in
     last_cig_difference
     ;;
   p)
-    addpartialcig
+    addpartialcig $2
     ;;
-  tstats)
-    gettodaystats
+  dstats)
+    getdaystats $2
     ;;
   stats)
     getstats
@@ -178,5 +224,13 @@ case $1 in
   ls)
     grep $today $cigfile
     ;;
+  "")
+    addcig
+    ;;
+  "-f")
+    addcig -f
+    ;;
+  *)
+    echo "Invalid argument ($*)"
+    ;;
 esac
-[[ -z $1 ]] && addcig
