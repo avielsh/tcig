@@ -5,6 +5,7 @@ target=60 #target in minutes for next smoke
 targetpartial=20 #target in minutes for next partial
 
 #main
+scr=$( basename $0 )
 now=$(gdate +'%m-%d %H:%M')
 today=$(echo $now | awk '{print $1}')
 
@@ -52,8 +53,8 @@ last_cig_difference() {
 }
 
 check_passed_target() {
+  local target diff
   target=$1
-
   diff=$(get_cig_diff silent)
   if [[ $diff -ne -1 &&  $diff -lt $target ]]
   then
@@ -65,15 +66,11 @@ check_passed_target() {
 }
 
 addcig() {
+  local msg="$msg_one" target=$target
+  [[ $1 == "p" ]] && msg=$msg_partial && target=$targetpartial && shift
   last_cig_difference
-  check_passed_target $target &&  echo $now $msg_one >> $cigfile
-  [[ $1 == "-f" ]] && echo "${blue}Warning${white} Forced entry" && echo "$now [forced] $msg_one" >> $cigfile
-}
-
-addpartialcig() {
-  last_cig_difference
-  check_passed_target $targetpartial && echo $now $msg_partial >> $cigfile
-  [[ $1 == "-f" ]] && echo "${blue}Warning${white} Forced entry" && echo "$now [forced] $msg_partial" >> $cigfile
+  check_passed_target $target &&  echo "$now ${msg}" >> $cigfile
+  [[ $1 == "-f" ]] && echo "${blue}Warning${white} Forced entry" && echo "$now [forced] $msg" >> $cigfile
 }
 
 helper_get_date() {
@@ -94,15 +91,28 @@ helper_get_time() {
 getstats() {
   local total partial one
   # rev $cigfile | uniq -c -f 2 | rev
-  total=$(awk '{print $1}' $cigfile | uniq -c)
-  partial=$(grep $msg_partial $cigfile | helper_get_date | uniq -c)
-  one=$(grep $msg_one $cigfile | helper_get_date | uniq -c)
-  echo Total
-  echo "$total"
-  echo Partial
-  echo "$partial"
-  echo One
-  echo "$one"
+  partial=$(grep $msg_partial $cigfile | helper_get_date | uniq -c | gsed 's/^ \+//')
+  one=$(grep $msg_one $cigfile | helper_get_date | uniq -c| gsed 's/^ \+//')
+  total=$(awk '{print $1}' $cigfile | uniq -c| gsed 's/^ \+//')
+
+  join=$( join -a 1 -1 2 -2 2 <(echo $one) <(echo $partial) )
+  join=$( join -a 1 -1 1 -2 2 <(echo $join) <(echo $total) | gsed 's/^/.\t/' | sort -r)
+  
+  totalone=$(echo $one | awk '{print $1}' | paste -sd+ - | bc)
+  totalpartial=$(echo $partial | awk '{print $1}' | paste -sd+ - | bc)
+  totaltotal=$(echo $total | awk '{print $1}' | paste -sd+ - | bc)
+  days=$(echo $join | wc -l)
+
+  totals="Totals\t$days\t$totalone\t$totalpartial\t$totaltotal"
+  header=".\tDate\tOne\tPartial\tTotal"
+  # sepcol="\t------"
+  sepcol=$(printf '=%.s' {1..6})
+  sep=".$(printf "\t$sepcol%.0s" {1..4})"
+  # sep=".${sepcol}${sepcol}${sepcol}${sepcol}"
+  
+  echo "$header\n$sep\n$join\n$sep\n$totals" | 
+    column -s $'\t ' -t | 
+    gsed "1s/\.\(.*\)/${blue} \1${white}/;\$s/[0-9].*/${blue}&${white}/;s/^\./ /"
 }
 
 compare_with_day() {
@@ -170,8 +180,7 @@ getdaystats() {
   partial=$(grep $msg_partial $cigfile | grep $day | helper_get_date | uniq -c | awk '{print $1}')
   forced=$(grep "\[forced\]" $cigfile | grep $day | helper_get_date | uniq -c | awk '{print $1}')
   one=$(grep $msg_one $cigfile | grep $day | helper_get_date | uniq -c | awk '{print $1}')
-
-  echo "$alltimes" | while read time
+  echo "$alltimes" | while read time 
   do
     [[ -z $prevtime ]] && prevtime=$time && continue
     diff=$(date_diff $prevtime $time)
@@ -199,12 +208,25 @@ getdaystats() {
   printf '%-35s %s\n' "Average duration between smokes:" "$average"
 }
 
+usage() {
+cat <<EOF
+$scr p [-f] - Add a partial smoke entry. -f = force
+$scr ls - List today's entries.
+$scr stats - Show total smoking stats.
+$scr dstats [date] - Show today's smoking stats.
+$scr rmlast - Remove latest entry.
+$scr replast - Replace latest entry from full to partial cigarette.
+$scr comp [date] - Compare smoking time to previous days. optional date can be a date or 3d for 3 days ago, 2w for 2 weeks ago etc. default is yesterday.
+$scr c - Check when last smoked
+EOF
+
+}
 case $1 in
   c)
     last_cig_difference
     ;;
   p)
-    addpartialcig $2
+    addcig p $2
     ;;
   dstats)
     getdaystats $2
@@ -223,6 +245,9 @@ case $1 in
     ;;
   ls)
     grep $today $cigfile
+    ;;
+  -(h|help)|h|help)
+    usage
     ;;
   "")
     addcig
